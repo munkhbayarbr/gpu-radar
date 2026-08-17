@@ -1,3 +1,4 @@
 dist/
+data/offers.json
 __pycache__/
 .DS_Store
