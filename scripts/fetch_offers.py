@@ -87,8 +87,29 @@ def update_history(offers, today):
     path.write_text(json.dumps(history, separators=(",", ":")))
 
 
+def fetch_runpod():
+    """Public RunPod list prices for the cross-provider comparison."""
+    body = json.dumps({"query": "query { gpuTypes { id displayName "
+                       "memoryInGb securePrice communityPrice } }"}).encode()
+    req = urllib.request.Request(
+        "https://api.runpod.io/graphql", data=body, method="POST",
+        headers={"Content-Type": "application/json",
+                 "User-Agent": "gpu-radar/1.0"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        types = json.load(r)["data"]["gpuTypes"]
+    return {t["id"]: {"name": t["displayName"], "vram": t["memoryInGb"],
+                      "secure": t["securePrice"],
+                      "community": t["communityPrice"]}
+            for t in types if t["securePrice"] or t["communityPrice"]}
+
+
 def main():
     DATA.mkdir(exist_ok=True)
+    try:
+        (DATA / "runpod.json").write_text(
+            json.dumps(fetch_runpod(), separators=(",", ":")))
+    except Exception as e:  # comparison is optional — never block Vast data
+        print(f"runpod fetch skipped: {e}")
     offers = [compact(o) for o in fetch()]
     now = datetime.now(timezone.utc)
     snapshot = {"updated": now.isoformat(timespec="seconds"), "offers": offers}

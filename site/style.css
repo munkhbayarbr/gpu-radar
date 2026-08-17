@@ -56,6 +56,7 @@ th { color: var(--dim); font-weight: 600; }
 tbody tr { border-top: 1px solid var(--border); }
 tbody tr:hover { background: var(--panel); }
 .num { font-variant-numeric: tabular-nums; }
+.dim { color: var(--dim); }
 .price { color: var(--accent); font-weight: 700; }
 .gpu { font-weight: 600; }
 .xn { color: var(--dim); font-size: 0.78rem; margin-left: 5px; }

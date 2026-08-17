@@ -14,8 +14,10 @@
 
   function row(o) {
     const rel = ((o.reliability2 || 0) * 100).toFixed(1);
+    const bid = o.min_bid && o.num_gpus ? '$' + (o.min_bid / o.num_gpus).toFixed(3) : '—';
     return `<tr><td class="gpu">${o.gpu_name}<span class="xn">×${o.num_gpus}</span></td>
       <td class="num price">$${unitPrice(o).toFixed(3)}</td>
+      <td class="num dim">${bid}</td>
       <td class="num">$${o.dph_total.toFixed(3)}</td>
       <td class="num">${Math.floor((o.gpu_ram || 0) / 1024)} GB</td>
       <td class="num">${Math.round(o.dlperf || 0)}</td>
@@ -45,7 +47,7 @@
           .sort((a, b) => unitPrice(a) - unitPrice(b));
         table.tBodies[0].innerHTML =
           rows.slice(0, 100).map(row).join('') ||
-          '<tr><td colspan="8" class="note">No offers match those filters.</td></tr>';
+          '<tr><td colspan="9" class="note">No offers match those filters.</td></tr>';
         $('offers-note').textContent = rows.length > 100
           ? `Showing 100 of ${rows.length} matching offers (cheapest first).`
           : `${rows.length} matching offers.`;

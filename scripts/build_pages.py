@@ -26,6 +26,48 @@ TAGLINE = "Live cloud GPU rental deals"
 MIN_OFFERS_FOR_PAGE = 5
 FEATURED = ["RTX 4090", "RTX 5090", "RTX 3090", "A100 SXM4", "H100 SXM",
             "RTX PRO 6000 WS", "RTX 5080", "L40S", "A100 PCIE", "H200"]
+INDEXNOW_KEY = "196ae58d54584ad1a57740e0086901ac"
+RUNPOD_URL = "https://www.runpod.io/"  # swap for affiliate link when approved
+VAST_TO_RUNPOD = {
+    "RTX 4090": "NVIDIA GeForce RTX 4090",
+    "RTX 5090": "NVIDIA GeForce RTX 5090",
+    "RTX 5080": "NVIDIA GeForce RTX 5080",
+    "RTX 4080": "NVIDIA GeForce RTX 4080",
+    "RTX 4080S": "NVIDIA GeForce RTX 4080 SUPER",
+    "RTX 4070 Ti": "NVIDIA GeForce RTX 4070 Ti",
+    "RTX 3090": "NVIDIA GeForce RTX 3090",
+    "RTX 3090 Ti": "NVIDIA GeForce RTX 3090 Ti",
+    "RTX 3080": "NVIDIA GeForce RTX 3080",
+    "RTX 3080 Ti": "NVIDIA GeForce RTX 3080 Ti",
+    "RTX 3070": "NVIDIA GeForce RTX 3070",
+    "A100 SXM4": "NVIDIA A100-SXM4-80GB",
+    "A100 PCIE": "NVIDIA A100 80GB PCIe",
+    "H100 SXM": "NVIDIA H100 80GB HBM3",
+    "H100 PCIE": "NVIDIA H100 PCIe",
+    "H100 NVL": "NVIDIA H100 NVL",
+    "H200": "NVIDIA H200",
+    "H200 NVL": "NVIDIA H200 NVL",
+    "B200": "NVIDIA B200",
+    "L4": "NVIDIA L4",
+    "L40": "NVIDIA L40",
+    "L40S": "NVIDIA L40S",
+    "A40": "NVIDIA A40",
+    "RTX A2000": "NVIDIA RTX A2000",
+    "RTX A4000": "NVIDIA RTX A4000",
+    "RTX A4500": "NVIDIA RTX A4500",
+    "RTX A5000": "NVIDIA RTX A5000",
+    "RTX A6000": "NVIDIA RTX A6000",
+    "RTX 2000Ada": "NVIDIA RTX 2000 Ada Generation",
+    "RTX 4000Ada": "NVIDIA RTX 4000 Ada Generation",
+    "RTX 5000Ada": "NVIDIA RTX 5000 Ada Generation",
+    "RTX 6000Ada": "NVIDIA RTX 6000 Ada Generation",
+    "RTX PRO 6000 WS": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+    "RTX PRO 6000 S": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+    "RTX PRO 5000": "NVIDIA RTX PRO 5000 Blackwell",
+    "RTX PRO 4500": "NVIDIA RTX PRO 4500 Blackwell",
+    "RTX PRO 4000": "NVIDIA RTX PRO 4000 Blackwell",
+    "Tesla V100": "Tesla V100-PCIE-16GB",
+}
 
 
 def slugify(name):
@@ -48,7 +90,12 @@ def gpu_stats(offers):
     out = {}
     for name, offs in stats.items():
         prices = sorted(unit_price(o) for o in offs)
+        bids = sorted(o["min_bid"] / o["num_gpus"] for o in offs
+                      if o.get("min_bid") and o["num_gpus"])
         out[name] = {
+            # p10 of current min-bids: robust "spot from" (raw min is often
+            # a stale outlier like $0.006/hr that reads as fake)
+            "bid": bids[len(bids) // 10] if bids else None,
             "name": name,
             "slug": slugify(name),
             "count": len(offs),
@@ -67,10 +114,13 @@ def offer_rows(offers, limit=None):
     for o in offers[:limit]:
         loc = esc(o.get("geolocation") or "—")
         rel = f"{(o.get('reliability2') or 0) * 100:.1f}%"
+        bid = (o.get("min_bid") / o["num_gpus"]
+               if o.get("min_bid") and o["num_gpus"] else None)
         rows.append(
             f"<tr><td class='gpu'>{esc(o['gpu_name'])}"
             f"<span class='xn'>×{o['num_gpus']}</span></td>"
             f"<td class='num price'>${unit_price(o):.3f}</td>"
+            f"<td class='num dim'>{f'${bid:.3f}' if bid else '—'}</td>"
             f"<td class='num'>${o['dph_total']:.3f}</td>"
             f"<td class='num'>{(o['gpu_ram'] or 0) // 1024} GB</td>"
             f"<td class='num'>{o.get('dlperf') or 0:.0f}</td>"
@@ -81,7 +131,8 @@ def offer_rows(offers, limit=None):
     return "\n".join(rows)
 
 
-TABLE_HEAD = ("<thead><tr><th>GPU</th><th>$/hr per GPU</th><th>$/hr total</th>"
+TABLE_HEAD = ("<thead><tr><th>GPU</th><th>$/hr per GPU</th>"
+              "<th>Spot $/GPU</th><th>$/hr total</th>"
               "<th>VRAM</th><th>DLPerf</th><th>Reliability</th>"
               "<th>Location</th><th></th></tr></thead>")
 
@@ -119,17 +170,50 @@ def page(title, desc, canonical, body, extra_head=""):
 </html>"""
 
 
-def build_index(stats, updated, offers):
+def runpod_compare_rows(stats, runpod):
+    rows = []
+    for name in FEATURED:
+        s = stats.get(name)
+        rp = runpod.get(VAST_TO_RUNPOD.get(name, ""))
+        if not s or not rp:
+            continue
+        bid = "~${:.3f}".format(s["bid"]) if s.get("bid") else "—"
+        comm = "${:.2f}".format(rp["community"]) if rp["community"] else "—"
+        sec = "${:.2f}".format(rp["secure"]) if rp["secure"] else "—"
+        rows.append(
+            f"<tr><td class='gpu'><a href='{BASE}/gpu/{s['slug']}/'>"
+            f"{esc(name)}</a></td>"
+            f"<td class='num price'>${s['min']:.3f}</td>"
+            f"<td class='num dim'>{bid}</td>"
+            f"<td class='num'>{comm}</td>"
+            f"<td class='num'>{sec}</td></tr>")
+    return "\n".join(rows)
+
+
+def build_index(stats, updated, offers, runpod):
     cards = []
     featured = [g for g in FEATURED if g in stats]
     for name in featured:
         s = stats[name]
+        spot = f" · spot ~${s['bid']:.3f}" if s.get("bid") else ""
         cards.append(f"""<a class="card" href="{BASE}/gpu/{s['slug']}/">
   <h3>{esc(name)}</h3>
   <p class="big">${s['min']:.3f}<span>/hr</span></p>
-  <p class="sub">{s['vram']} GB · {s['count']} offers · median ${s['med']:.3f}</p>
+  <p class="sub">{s['vram']} GB · {s['count']} offers{spot}</p>
 </a>""")
     cheapest = sorted(offers, key=unit_price)
+    cmp_rows = runpod_compare_rows(stats, runpod)
+    compare_section = f"""<section id="compare">
+  <h2>Vast.ai vs RunPod — price per GPU/hr</h2>
+  <p class="note">Vast prices are live marketplace lows (on-demand and
+  interruptible spot); <a href="{RUNPOD_URL}" target="_blank"
+  rel="noopener">RunPod</a> prices are current list rates
+  (community / secure cloud).</p>
+  <div class="tablewrap"><table>
+  <thead><tr><th>GPU</th><th>Vast on-demand</th><th>Vast spot</th>
+  <th>RunPod community</th><th>RunPod secure</th></tr></thead>
+  <tbody>{cmp_rows}</tbody></table></div>
+</section>""" if cmp_rows else ""
     body = f"""
 <main>
 <section class="hero">
@@ -143,6 +227,7 @@ def build_index(stats, updated, offers):
   <h2>Popular GPUs — lowest price per GPU/hr</h2>
   <div class="cards">{''.join(cards)}</div>
 </section>
+{compare_section}
 <section id="fit">
   <h2>Will my model fit? 🧮</h2>
   <p>Pick a model size and quantization — we estimate VRAM and find the cheapest GPU that fits.</p>
@@ -189,8 +274,21 @@ def build_index(stats, updated, offers):
     return page(title, desc, f"{ORIGIN}{BASE}/", body)
 
 
-def build_gpu_page(s, stats, updated):
+def build_gpu_page(s, stats, updated, runpod):
     name = s["name"]
+    rp = runpod.get(VAST_TO_RUNPOD.get(name, ""))
+    spot_txt = (f" Interruptible (spot) instances start around "
+                f"<strong>~${s['bid']:.3f}/hr</strong>." if s.get("bid") else "")
+    rp_txt = ""
+    if rp and (rp["community"] or rp["secure"]):
+        parts = []
+        if rp["community"]:
+            parts.append(f"community ${rp['community']:.2f}/hr")
+        if rp["secure"]:
+            parts.append(f"secure ${rp['secure']:.2f}/hr")
+        rp_txt = (f" For comparison, <a href='{RUNPOD_URL}' target='_blank' "
+                  f"rel='noopener'>RunPod</a> lists the {esc(name)} at "
+                  f"{' / '.join(parts)}.")
     faq = [
         (f"How much does it cost to rent a {name} in the cloud?",
          f"Right now the cheapest verified {name} on the Vast.ai marketplace "
@@ -199,8 +297,10 @@ def build_gpu_page(s, stats, updated):
         (f"How much VRAM does a {name} have?",
          f"{name} offers on this page have up to {s['vram']} GB of VRAM."),
         ("Are these prices on-demand or interruptible?",
-         "All prices shown are verified on-demand (uninterruptible) offers. "
-         "Interruptible/bid instances are usually cheaper still."),
+         "The main price is for verified on-demand (uninterruptible) offers; "
+         "the Spot column shows the current minimum bid for the same machine "
+         + (f"— {name} spot prices currently start around ~${s['bid']:.3f}/hr."
+            if s.get("bid") else ".")),
     ]
     faq_ld = json.dumps({
         "@context": "https://schema.org", "@type": "FAQPage",
@@ -221,7 +321,7 @@ def build_gpu_page(s, stats, updated):
   <h1>{esc(name)} cloud rental price</h1>
   <p class="lede">Cheapest verified {esc(name)} right now:
   <strong>${s['min']:.3f}/hr</strong> per GPU · median ${s['med']:.3f}/hr
-  across {s['count']} on-demand offers · up to {s['vram']} GB VRAM.
+  across {s['count']} on-demand offers · up to {s['vram']} GB VRAM.{spot_txt}{rp_txt}
   Updated <span id="updated">{esc(updated)}</span>.</p>
   <a class="cta" href="{RENT_URL}" target="_blank" rel="sponsored noopener">Rent a {esc(name)} on Vast.ai →</a>
 </section>
@@ -256,21 +356,29 @@ def main():
     offers = [o for o in snapshot["offers"] if o["dph_total"]]
     updated = snapshot["updated"].replace("T", " ").replace("+00:00", " UTC")
     stats = gpu_stats(offers)
+    runpod = {}
+    if (DATA / "runpod.json").exists():
+        runpod = json.loads((DATA / "runpod.json").read_text())
 
     if DIST.exists():
         shutil.rmtree(DIST)
     (DIST / "gpu").mkdir(parents=True)
     (DIST / "data").mkdir()
 
-    (DIST / "index.html").write_text(build_index(stats, updated, offers))
+    (DIST / "index.html").write_text(
+        build_index(stats, updated, offers, runpod))
     urls = [f"{ORIGIN}{BASE}/"]
     for s in stats.values():
         if s["count"] < MIN_OFFERS_FOR_PAGE:
             continue
         d = DIST / "gpu" / s["slug"]
         d.mkdir()
-        (d / "index.html").write_text(build_gpu_page(s, stats, updated))
+        (d / "index.html").write_text(
+            build_gpu_page(s, stats, updated, runpod))
         urls.append(f"{ORIGIN}{BASE}/gpu/{s['slug']}/")
+
+    (DIST / f"{INDEXNOW_KEY}.txt").write_text(INDEXNOW_KEY)
+    (DIST / "urls.txt").write_text("\n".join(urls))
 
     (DIST / "sitemap.xml").write_text(
         '<?xml version="1.0" encoding="UTF-8"?>\n'

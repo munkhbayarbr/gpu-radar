@@ -49,3 +49,6 @@ jobs:
           path: dist
       - id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Ping IndexNow
+        run: python3 scripts/indexnow_ping.py
