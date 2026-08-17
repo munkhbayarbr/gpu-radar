@@ -150,13 +150,14 @@ def page(title, desc, canonical, body, extra_head=""):
 <meta property="og:description" content="{esc(desc)}">
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
+<link rel="alternate" type="application/rss+xml" title="{SITE_NAME} daily GPU deals" href="{BASE}/deals.xml">
 <link rel="stylesheet" href="{BASE}/style.css">
 {extra_head}
 </head>
 <body>
 <header class="top">
   <a class="brand" href="{BASE}/">📡 {SITE_NAME}</a>
-  <nav><a href="{BASE}/#deals">Deals</a> <a href="{BASE}/#fit">Fit calculator</a> <a href="{BASE}/#gpus">GPUs</a></nav>
+  <nav><a href="{BASE}/#deals">Deals</a> <a href="{BASE}/#fit">Fit calculator</a> <a href="{BASE}/#gpus">GPUs</a> <a href="{BASE}/deals.xml" title="Daily deals RSS feed">RSS</a></nav>
 </header>
 {body}
 <footer>
@@ -168,6 +169,48 @@ def page(title, desc, canonical, body, extra_head=""):
 <script src="{BASE}/app.js" defer></script>
 </body>
 </html>"""
+
+
+def build_feed(stats, history, updated_iso):
+    """RSS deals feed: one item per featured GPU per day (guid = slug+date),
+    flagged as a DEAL when today's min undercuts the 7-day baseline."""
+    from datetime import datetime
+    dt = datetime.fromisoformat(updated_iso)
+    day = dt.strftime("%Y-%m-%d")
+    pub = dt.strftime("%a, %d %b %Y %H:%M:%S +0000")
+    items = []
+    for name in FEATURED:
+        s = stats.get(name)
+        if not s:
+            continue
+        entries = history.get(name, [])
+        prior = [e["min"] for e in entries if e["d"] != day][-7:]
+        baseline = statistics.median(prior) if len(prior) >= 3 else None
+        deal = baseline and s["min"] <= 0.92 * baseline
+        pct = f" — {round((1 - s['min'] / baseline) * 100)}% below the 7-day typical low" \
+            if deal else ""
+        spot = f", spot ~${s['bid']:.3f}/hr" if s.get("bid") else ""
+        title = (f"{'DEAL: ' if deal else ''}{name} from ${s['min']:.3f}/hr"
+                 f"{pct}")
+        desc = (f"{name}: cheapest verified on-demand offer ${s['min']:.3f}/hr"
+                f" per GPU (median ${s['med']:.3f}/hr{spot}, "
+                f"{s['count']} offers, up to {s['vram']} GB VRAM).")
+        url = f"{ORIGIN}{BASE}/gpu/{s['slug']}/"
+        items.append(
+            f"<item><title>{esc(title)}</title><link>{url}</link>"
+            f"<guid isPermaLink=\"false\">{s['slug']}-{day}</guid>"
+            f"<pubDate>{pub}</pubDate>"
+            f"<description>{esc(desc)}</description></item>")
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<rss version="2.0"><channel>'
+        f"<title>{SITE_NAME} — daily GPU deals</title>"
+        f"<link>{ORIGIN}{BASE}/</link>"
+        "<description>Cheapest cloud GPU rentals on the Vast.ai marketplace, "
+        "with deal alerts when prices drop below their 7-day typical low."
+        "</description>"
+        f"<lastBuildDate>{pub}</lastBuildDate>"
+        + "".join(items) + "</channel></rss>")
 
 
 def runpod_compare_rows(stats, runpod):
@@ -379,6 +422,12 @@ def main():
 
     (DIST / f"{INDEXNOW_KEY}.txt").write_text(INDEXNOW_KEY)
     (DIST / "urls.txt").write_text("\n".join(urls))
+
+    history = {}
+    if (DATA / "history.json").exists():
+        history = json.loads((DATA / "history.json").read_text())
+    (DIST / "deals.xml").write_text(
+        build_feed(stats, history, snapshot["updated"]))
 
     (DIST / "sitemap.xml").write_text(
         '<?xml version="1.0" encoding="UTF-8"?>\n'
