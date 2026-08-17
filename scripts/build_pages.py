@@ -254,7 +254,7 @@ def build_gpu_page(s, stats, updated):
 def main():
     snapshot = json.loads((DATA / "offers.json").read_text())
     offers = [o for o in snapshot["offers"] if o["dph_total"]]
-    updated = snapshot["updated"].replace("+00:00", " UTC").replace("T", " ")
+    updated = snapshot["updated"].replace("T", " ").replace("+00:00", " UTC")
     stats = gpu_stats(offers)
 
     if DIST.exists():
