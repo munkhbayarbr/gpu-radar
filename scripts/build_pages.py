@@ -411,7 +411,7 @@ def main():
     (DIST / "index.html").write_text(
         build_index(stats, updated, offers, runpod))
     # stable redirect pages (e.g. site/undral/index.html -> live kiosk tunnel)
-    for extra in ("undral",):
+    for extra in ("undral", "newcompass"):
         if (SITE / extra).exists():
             shutil.copytree(SITE / extra, DIST / extra, dirs_exist_ok=True)
     urls = [f"{ORIGIN}{BASE}/"]
